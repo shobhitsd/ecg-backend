@@ -569,8 +569,8 @@ class ECGEnsembleInference:
         # ST elevation check
         st_elev_idx = self.feature_names.index("max_st_elevation")
         st_elev = features[st_elev_idx]
-        if st_elev > 0.001:
-            findings.append(f"ST elevation detected: {st_elev*1000:.2f} mm")
+        if st_elev > 0.1:  # Threshold > 1mm (0.1 mV)
+            findings.append(f"ST elevation detected: {st_elev*10:.2f} mm")
         
         return {
             "prediction": "ABNORMAL" if final_pred > 0.5 else "NORMAL",
