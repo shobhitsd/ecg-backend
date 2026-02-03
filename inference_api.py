@@ -528,7 +528,20 @@ class ECGEnsembleInference:
         shap_explanations = []
         if hasattr(self, 'explainer') and self.explainer is not None:
             try:
-                shap_values = self.explainer.shap_values(features_scaled)[0]
+                shap_values_raw = self.explainer.shap_values(features_scaled)
+                logger.info(f"SHAP raw type: {type(shap_values_raw)}")
+                
+                # Handle different SHAP return types (list vs array)
+                if isinstance(shap_values_raw, list):
+                    shap_values = shap_values_raw[0] if len(shap_values_raw) > 0 else []
+                else:
+                    shap_values = shap_values_raw
+                
+                if len(shap_values.shape) == 2:
+                    shap_values = shap_values[0]
+                    
+                logger.info(f"SHAP final shape: {shap_values.shape}")
+                
                 top_indices = np.argsort(np.abs(shap_values))[-5:][::-1]
                 for idx in top_indices:
                     if idx < len(self.feature_names):
@@ -539,6 +552,8 @@ class ECGEnsembleInference:
                         })
             except Exception as e:
                 logger.warning(f"SHAP explanation failed: {e}")
+                import traceback
+                logger.warning(traceback.format_exc())
         
         # Clinical findings
         findings = []
