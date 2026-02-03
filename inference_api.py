@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 # FastAPI
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -670,6 +670,68 @@ async def predict(input_data: ECGInput):
 async def analyze(input_data: ECGInput):
     """Alias for predict endpoint."""
     return await predict(input_data)
+
+@app.post("/analyze-ecg")
+async def analyze_ecg_file(file: UploadFile = File(...)):
+    """
+    Analyze ECG from uploaded CSV file.
+    Expected format: CSV with 1000 rows x 12 columns (or 12 rows x 1000 columns)
+    """
+    if ensemble is None:
+        raise HTTPException(status_code=503, detail="Models not loaded")
+    
+    try:
+        # Read file content
+        content = await file.read()
+        text = content.decode("utf-8")
+        
+        # Parse CSV
+        lines = text.strip().split("\n")
+        data = []
+        for line in lines:
+            # Handle both comma and whitespace separators
+            if "," in line:
+                row = [float(x.strip()) for x in line.split(",") if x.strip()]
+            else:
+                row = [float(x) for x in line.split() if x.strip()]
+            if row:
+                data.append(row)
+        
+        ecg_array = np.array(data, dtype=np.float32)
+        
+        # Handle transposed data (12x1000 -> 1000x12)
+        if ecg_array.shape == (config.NUM_LEADS, config.ECG_LENGTH):
+            ecg_array = ecg_array.T
+        
+        # Validate shape
+        if ecg_array.shape != (config.ECG_LENGTH, config.NUM_LEADS):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Expected shape ({config.ECG_LENGTH}, {config.NUM_LEADS}), got {ecg_array.shape}. "
+                       f"Please provide a CSV with 1000 rows and 12 columns."
+            )
+        
+        # Run inference
+        result = ensemble.predict(ecg_array)
+        
+        # Format response to match frontend expectations
+        return {
+            "prediction": result["prediction"],
+            "risk_score": result["risk_percentage"],
+            "explanation": f"Analysis based on {config.FEATURE_DIM} clinical features extracted from ECG. "
+                          + "; ".join(result.get("clinical_findings", [])),
+            "shap_values": {f["feature"]: f["impact"] for f in result.get("contributing_factors", [])},
+            "confidence": result["confidence"],
+            "cnn_score": result["cnn_score"],
+            "xgb_score": result["xgb_score"],
+            "model_version": result["model_version"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"File analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================
 # RUN SERVER
